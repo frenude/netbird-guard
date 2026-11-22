@@ -1,0 +1,103 @@
+name: Release nbg
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: nbg-darwin-aarch64
+            bin: nbg
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: nbg-darwin-x86_64
+            bin: nbg
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: nbg-linux-x86_64
+            bin: nbg
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: nbg-linux-aarch64
+            bin: nbg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: nbg-windows-x86_64.exe
+            bin: nbg.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Stage artifact
+        shell: bash
+        run: cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Generate SHA256SUMS and Release Notes
+        id: meta
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum nbg-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          BUILD_TIME="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          TAG="${GITHUB_REF_NAME}"
+          cat > ../release_body.md <<EOF
+          ## 📦 nbg ${TAG}
+
+          - **Build Time**: \`${BUILD_TIME}\`
+          - **Commit**: \`${GITHUB_SHA::7}\`
+
+          ### Quick Install (macOS & Linux)
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/frenude/netbird-guard/main/install.sh | sh
+          \`\`\`
+
+          ### Prebuilt Binaries
+          | Platform | Architecture | Asset |
+          |---|---|---|
+          | macOS | Apple Silicon (arm64) | \`nbg-darwin-aarch64\` |
+          | macOS | Intel (x86_64) | \`nbg-darwin-x86_64\` |
+          | Linux | x86_64 | \`nbg-linux-x86_64\` |
+          | Linux | ARM64 (aarch64) | \`nbg-linux-aarch64\` |
+          | Windows | x86_64 | \`nbg-windows-x86_64.exe\` |
+
+          Checksums are included in \`SHA256SUMS.txt\`.
+          EOF
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+          name: "nbg ${{ github.ref_name }}"
+          body_path: release_body.md
+          generate_release_notes: true
+          files: |
+            artifacts/nbg-*
+            artifacts/SHA256SUMS.txt

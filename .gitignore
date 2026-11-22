@@ -1,0 +1,7 @@
+/target
+.DS_Store
+web/node_modules
+web/.vercel
+web/.env
+web/.env.local
+dist/
